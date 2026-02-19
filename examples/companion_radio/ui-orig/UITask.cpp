@@ -16,6 +16,15 @@
 #define USER_BTN_PRESSED LOW
 #endif
 
+#ifdef RAK_WISMESH_TAG
+  #ifndef SOS_GROUP_CHANNEL_IDX
+    #define SOS_GROUP_CHANNEL_IDX 0
+  #endif
+  #ifndef SOS_BUTTON_MESSAGE
+    #define SOS_BUTTON_MESSAGE "SOS"
+  #endif
+#endif
+
 // 'meshcore', 128x13px
 static const uint8_t meshcore_logo [] PROGMEM = {
     0x3c, 0x01, 0xe3, 0xff, 0xc7, 0xff, 0x8f, 0x03, 0x87, 0xfe, 0x1f, 0xfe, 0x1f, 0xfe, 0x1f, 0xfe, 
@@ -362,6 +371,28 @@ void UITask::handleButtonAnyPress() {
 
 void UITask::handleButtonShortPress() {
   MESH_DEBUG_PRINTLN("UITask: short press triggered");
+
+#ifdef RAK_WISMESH_TAG
+  ChannelDetails channel;
+  if (the_mesh.getChannel(SOS_GROUP_CHANNEL_IDX, channel)) {
+    uint32_t timestamp = the_mesh.getRTCClock()->getCurrentTimeUnique();
+    if (the_mesh.sendGroupMessage(timestamp, channel.channel, the_mesh.getNodeName(), SOS_BUTTON_MESSAGE, strlen(SOS_BUTTON_MESSAGE))) {
+      MESH_DEBUG_PRINTLN("SOS group message sent on channel %d", SOS_GROUP_CHANNEL_IDX);
+      sprintf(_alert, "SOS sent to ch %d", SOS_GROUP_CHANNEL_IDX);
+      #ifdef PIN_BUZZER
+        notify(UIEventType::ack);
+      #endif
+    } else {
+      MESH_DEBUG_PRINTLN("SOS group message failed on channel %d", SOS_GROUP_CHANNEL_IDX);
+      sprintf(_alert, "SOS failed");
+    }
+  } else {
+    MESH_DEBUG_PRINTLN("SOS channel %d not configured", SOS_GROUP_CHANNEL_IDX);
+    sprintf(_alert, "SOS ch %d missing", SOS_GROUP_CHANNEL_IDX);
+  }
+  _need_refresh = true;
+#endif
+
   if (_display != NULL) {
     // Only clear message preview if display was already on before button press
     if (_displayWasOn) {
