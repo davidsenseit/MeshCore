@@ -17,8 +17,8 @@
 #endif
 
 #ifdef RAK_WISMESH_TAG
-  #ifndef SOS_GROUP_CHANNEL_IDX
-    #define SOS_GROUP_CHANNEL_IDX 0
+  #ifndef SOS_GROUP_CHANNEL_NAME
+    #define SOS_GROUP_CHANNEL_NAME "public"  // Kanal att skicka SOS till
   #endif
   #ifndef SOS_BUTTON_MESSAGE
     #define SOS_BUTTON_MESSAGE "SOS"
@@ -373,22 +373,38 @@ void UITask::handleButtonShortPress() {
   MESH_DEBUG_PRINTLN("UITask: short press triggered");
 
 #ifdef RAK_WISMESH_TAG
+  // Sök efter kanalen efter namn
   ChannelDetails channel;
-  if (the_mesh.getChannel(SOS_GROUP_CHANNEL_IDX, channel)) {
+  int channel_idx = -1;
+  
+  // Debug: Lista alla kanaler
+  MESH_DEBUG_PRINTLN("DEBUG: Searching for channel '%s'", SOS_GROUP_CHANNEL_NAME);
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (the_mesh.getChannel(i, channel)) {
+      MESH_DEBUG_PRINTLN("  Channel %d: '%s'", i, channel.name);
+      if (strcmp(channel.name, SOS_GROUP_CHANNEL_NAME) == 0) {
+        channel_idx = i;
+        MESH_DEBUG_PRINTLN("  -> MATCH FOUND!");
+        break;
+      }
+    }
+  }
+  
+  if (channel_idx >= 0) {
     uint32_t timestamp = the_mesh.getRTCClock()->getCurrentTimeUnique();
     if (the_mesh.sendGroupMessage(timestamp, channel.channel, the_mesh.getNodeName(), SOS_BUTTON_MESSAGE, strlen(SOS_BUTTON_MESSAGE))) {
-      MESH_DEBUG_PRINTLN("SOS group message sent on channel %d", SOS_GROUP_CHANNEL_IDX);
-      sprintf(_alert, "SOS sent to ch %d", SOS_GROUP_CHANNEL_IDX);
+      MESH_DEBUG_PRINTLN("SOS group message sent to channel '%s' (idx %d)", SOS_GROUP_CHANNEL_NAME, channel_idx);
+      sprintf(_alert, "SOS sent to %s", SOS_GROUP_CHANNEL_NAME);
       #ifdef PIN_BUZZER
         notify(UIEventType::ack);
       #endif
     } else {
-      MESH_DEBUG_PRINTLN("SOS group message failed on channel %d", SOS_GROUP_CHANNEL_IDX);
+      MESH_DEBUG_PRINTLN("SOS group message failed for channel '%s'", SOS_GROUP_CHANNEL_NAME);
       sprintf(_alert, "SOS failed");
     }
   } else {
-    MESH_DEBUG_PRINTLN("SOS channel %d not configured", SOS_GROUP_CHANNEL_IDX);
-    sprintf(_alert, "SOS ch %d missing", SOS_GROUP_CHANNEL_IDX);
+    MESH_DEBUG_PRINTLN("SOS channel '%s' not configured", SOS_GROUP_CHANNEL_NAME);
+    sprintf(_alert, "SOS '%s' missing", SOS_GROUP_CHANNEL_NAME);
   }
   _need_refresh = true;
 #endif
