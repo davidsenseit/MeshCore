@@ -417,12 +417,40 @@ void UITask::handleButtonShortPress() {
   MESH_DEBUG_PRINTLN("UITask: short press triggered");
 
 #ifdef RAK_WISMESH_TAG
-  bool sent = sendEmergencyMessage(SOS_BUTTON_MESSAGE_SHORT, _alert, _need_refresh);
-  if (sent) {
-    #ifdef PIN_BUZZER
-      notify(UIEventType::ack);
-    #endif
+  // Sök efter kanalen efter namn
+  ChannelDetails channel;
+  int channel_idx = -1;
+  
+  // Debug: Lista alla kanaler
+  MESH_DEBUG_PRINTLN("DEBUG: Searching for channel '%s'", SOS_GROUP_CHANNEL_NAME);
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (the_mesh.getChannel(i, channel)) {
+      MESH_DEBUG_PRINTLN("  Channel %d: '%s'", i, channel.name);
+      if (strcmp(channel.name, SOS_GROUP_CHANNEL_NAME) == 0) {
+        channel_idx = i;
+        MESH_DEBUG_PRINTLN("  -> MATCH FOUND!");
+        break;
+      }
+    }
   }
+  
+  if (channel_idx >= 0) {
+    uint32_t timestamp = the_mesh.getRTCClock()->getCurrentTimeUnique();
+    if (the_mesh.sendGroupMessage(timestamp, channel.channel, the_mesh.getNodeName(), SOS_BUTTON_MESSAGE, strlen(SOS_BUTTON_MESSAGE))) {
+      MESH_DEBUG_PRINTLN("SOS group message sent to channel '%s' (idx %d)", SOS_GROUP_CHANNEL_NAME, channel_idx);
+      sprintf(_alert, "SOS sent to %s", SOS_GROUP_CHANNEL_NAME);
+      #ifdef PIN_BUZZER
+        notify(UIEventType::ack);
+      #endif
+    } else {
+      MESH_DEBUG_PRINTLN("SOS group message failed for channel '%s'", SOS_GROUP_CHANNEL_NAME);
+      sprintf(_alert, "SOS failed");
+    }
+  } else {
+    MESH_DEBUG_PRINTLN("SOS channel '%s' not configured", SOS_GROUP_CHANNEL_NAME);
+    sprintf(_alert, "SOS '%s' missing", SOS_GROUP_CHANNEL_NAME);
+  }
+  _need_refresh = true;
 #endif
 
   if (_display != NULL) {
