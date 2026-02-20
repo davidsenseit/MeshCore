@@ -16,6 +16,59 @@
 #define USER_BTN_PRESSED LOW
 #endif
 
+#ifdef RAK_WISMESH_TAG
+  #ifndef SOS_GROUP_NAME
+    #define SOS_GROUP_NAME "Emergency"
+  #endif
+  #ifndef SOS_BUTTON_MESSAGE_SHORT
+    #define SOS_BUTTON_MESSAGE_SHORT "SOS"
+  #endif
+  #ifndef SOS_BUTTON_MESSAGE_DOUBLE
+    #define SOS_BUTTON_MESSAGE_DOUBLE "SOSH"
+  #endif
+  #ifndef SOS_BUTTON_MESSAGE_TRIPLE
+    #define SOS_BUTTON_MESSAGE_TRIPLE "OK"
+  #endif
+
+#endif
+
+
+#ifdef RAK_WISMESH_TAG
+static bool sendEmergencyMessage(const char* text, char* alert, bool& need_refresh) {
+  ChannelDetails channel;
+  bool found_emergency = false;
+  int emergency_idx = -1;
+
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    if (the_mesh.getChannel(i, channel) && strcmp(channel.name, SOS_GROUP_NAME) == 0) {
+      found_emergency = true;
+      emergency_idx = i;
+      break;
+    }
+  }
+
+  if (!found_emergency) {
+    MESH_DEBUG_PRINTLN("Emergency group '%s' not found", SOS_GROUP_NAME);
+    sprintf(alert, "%s missing", SOS_GROUP_NAME);
+    need_refresh = true;
+    return false;
+  }
+
+  uint32_t timestamp = the_mesh.getRTCClock()->getCurrentTimeUnique();
+  if (the_mesh.sendGroupMessage(timestamp, channel.channel, the_mesh.getNodeName(), text, strlen(text))) {
+    MESH_DEBUG_PRINTLN("Emergency message sent (%s) to group '%s' idx=%d", text, SOS_GROUP_NAME, emergency_idx);
+    sprintf(alert, "%s sent", text);
+    need_refresh = true;
+    return true;
+  }
+
+  MESH_DEBUG_PRINTLN("Emergency message failed (%s) to group '%s' idx=%d", text, SOS_GROUP_NAME, emergency_idx);
+  sprintf(alert, "%s failed", text);
+  need_refresh = true;
+  return false;
+}
+#endif
+
 // 'meshcore', 128x13px
 static const uint8_t meshcore_logo [] PROGMEM = {
     0x3c, 0x01, 0xe3, 0xff, 0xc7, 0xff, 0x8f, 0x03, 0x87, 0xfe, 0x1f, 0xfe, 0x1f, 0xfe, 0x1f, 0xfe, 
@@ -362,6 +415,16 @@ void UITask::handleButtonAnyPress() {
 
 void UITask::handleButtonShortPress() {
   MESH_DEBUG_PRINTLN("UITask: short press triggered");
+
+#ifdef RAK_WISMESH_TAG
+  bool sent = sendEmergencyMessage(SOS_BUTTON_MESSAGE_SHORT, _alert, _need_refresh);
+  if (sent) {
+    #ifdef PIN_BUZZER
+      notify(UIEventType::ack);
+    #endif
+  }
+#endif
+
   if (_display != NULL) {
     // Only clear message preview if display was already on before button press
     if (_displayWasOn) {
@@ -380,6 +443,17 @@ void UITask::handleButtonShortPress() {
 }
 
 void UITask::handleButtonDoublePress() {
+#ifdef RAK_WISMESH_TAG
+  MESH_DEBUG_PRINTLN("UITask: double press triggered");
+  bool sent = sendEmergencyMessage(SOS_BUTTON_MESSAGE_DOUBLE, _alert, _need_refresh);
+  if (sent) {
+    #ifdef PIN_BUZZER
+      notify(UIEventType::ack);
+    #endif
+  }
+  return;
+#endif
+
   MESH_DEBUG_PRINTLN("UITask: double press triggered, sending advert");
   // ADVERT
   #ifdef PIN_BUZZER
@@ -396,6 +470,17 @@ void UITask::handleButtonDoublePress() {
 }
 
 void UITask::handleButtonTriplePress() {
+#ifdef RAK_WISMESH_TAG
+  MESH_DEBUG_PRINTLN("UITask: triple press triggered");
+  bool sent = sendEmergencyMessage(SOS_BUTTON_MESSAGE_TRIPLE, _alert, _need_refresh);
+  if (sent) {
+    #ifdef PIN_BUZZER
+      notify(UIEventType::ack);
+    #endif
+  }
+  return;
+#endif
+
   MESH_DEBUG_PRINTLN("UITask: triple press triggered");
   // Toggle buzzer quiet mode
   #ifdef PIN_BUZZER
