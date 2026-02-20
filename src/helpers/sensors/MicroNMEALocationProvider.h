@@ -3,6 +3,9 @@
 #include "LocationProvider.h"
 #include <MicroNMEA.h>
 #include <RTClib.h>
+#include <stdlib.h>
+#include <time.h>
+#include <cmath>
 #include <helpers/RefCountedDigitalPin.h>
 
 #ifndef GPS_EN
@@ -128,13 +131,23 @@ public :
             next_check = millis() + 1000;
             if (_time_sync_needed && time_valid > 2) {
                 if (_clock != NULL) {
-                    _clock->setCurrentTime(getTimestamp());
+                        _clock->setCurrentTime(getTimestamp());
                     _time_sync_needed = false;
                 }
             }
             if (isValid()) {
                 time_valid ++;
             }
+                // When GPS has a valid fix and clock was just synced, set TZ env var
+                if (!_time_sync_needed && isValid()) {
+                    // approximate timezone hours from longitude
+                    double lon_deg = (double)nmea.getLongitude() / 1000000.0;
+                    int tz_hours = (int)round(lon_deg / 15.0);
+                    char tzbuf[16];
+                    snprintf(tzbuf, sizeof(tzbuf), "UTC%+d", tz_hours);
+                    setenv("TZ", tzbuf, 1);
+                    tzset();
+                }
         }
     }
 };

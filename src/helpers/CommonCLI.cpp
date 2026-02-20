@@ -81,6 +81,12 @@ void CommonCLI::loadPrefsInt(FILESYSTEM* fs, const char* filename) {
     file.read((uint8_t *)&_prefs->discovery_mod_timestamp, sizeof(_prefs->discovery_mod_timestamp)); // 162
     file.read((uint8_t *)&_prefs->adc_multiplier, sizeof(_prefs->adc_multiplier)); // 166
     file.read((uint8_t *)_prefs->owner_info, sizeof(_prefs->owner_info));  // 170
+    // tz_offset (optional, may not be present in older pref files)
+    if (file.available() >= 1) {
+      file.read((uint8_t *)&_prefs->tz_offset, sizeof(_prefs->tz_offset));
+    } else {
+      _prefs->tz_offset = 0;
+    }
     // 290
 
     // sanitise bad pref values
@@ -165,6 +171,8 @@ void CommonCLI::savePrefs(FILESYSTEM* fs) {
     file.write((uint8_t *)&_prefs->discovery_mod_timestamp, sizeof(_prefs->discovery_mod_timestamp)); // 162
     file.write((uint8_t *)&_prefs->adc_multiplier, sizeof(_prefs->adc_multiplier));                 // 166
     file.write((uint8_t *)_prefs->owner_info, sizeof(_prefs->owner_info));  // 170
+    // tz_offset
+    file.write((uint8_t *)&_prefs->tz_offset, sizeof(_prefs->tz_offset));
     // 290
 
     file.close();
@@ -778,6 +786,18 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, const char* command, ch
       _callbacks->formatRadioStatsReply(reply);
     } else if (sender_timestamp == 0 && memcmp(command, "stats-core", 10) == 0 && (command[10] == 0 || command[10] == ' ')) {
       _callbacks->formatStatsReply(reply);
+    } else if (memcmp(command, "set tz", 6) == 0) {
+      // set tz offset in hours: e.g. "set tz 1" or "set tz -5"
+      const char* p = command + 6;
+      while (*p == ' ') p++;
+      int tz = 0;
+      bool neg = false;
+      if (*p == '-') { neg = true; p++; }
+      tz = (int)_atoi(p);
+      if (neg) tz = -tz;
+      _prefs->tz_offset = (int8_t)tz;
+      savePrefs();
+      sprintf(reply, "OK - tz set to %+d", _prefs->tz_offset);
     } else {
       strcpy(reply, "Unknown command");
     }

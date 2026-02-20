@@ -2,6 +2,8 @@
 #include <helpers/TxtDataHelpers.h>
 #include "../MyMesh.h"
 #include "target.h"
+#include <ctime>
+#include <cmath>
 #ifdef WIFI_SSID
   #include <WiFi.h>
 #endif
@@ -204,28 +206,76 @@ public:
     }
 
     if (_page == HomePage::FIRST) {
-      display.setColor(DisplayDriver::YELLOW);
-      display.setTextSize(2);
-      sprintf(tmp, "MSG: %d", _task->getMsgCount());
-      display.drawTextCentered(display.width() / 2, 20, tmp);
+      // Display latest Emergency group message instead of MSG count
+      if (_task->hasEmergencyMsg()) {
+        // Record the timestamp on first display (when message is first shown)
+        if (!_task->isEmergencyTimestampSet()) {
+          _task->setEmergencyTimestamp(_rtc->getCurrentTime());
+        }
+        
+        // Show "Emergency" label with sender - starting at row 18 to leave space for device name
+        display.setColor(DisplayDriver::RED);
+        display.setTextSize(1);
+        display.setCursor(0, 18);
+        display.print("Emergency:");
+        
+        // Show sender name on next line
+        display.setColor(DisplayDriver::YELLOW);
+        display.setCursor(0, 28);
+        display.setTextSize(1);
+        char sender_display[40];
+        display.translateUTF8ToBlocks(sender_display, _task->getLatestEmergencySender(), sizeof(sender_display));
+        display.print(sender_display);
+        
+        // Show date and time (YYYY-MM-DD HH:MM format) - when the message arrived
+        // Adjust displayed time to local timezone based on GPS longitude if available
+        display.setColor(DisplayDriver::LIGHT);
+        display.setCursor(0, 40);
+        display.setTextSize(1);
+        time_t msg_time = _task->getLatestEmergencyTimestamp();
+        // Default: no offset (UTC)
+        long tz_offset_seconds = 0;
+        if (_sensors != NULL) {
+          LocationProvider* nmea = _sensors->getLocationProvider();
+          if (nmea != NULL && nmea->isValid()) {
+            // getLongitude() returns microdegrees (1e-6 deg), convert to degrees
+            double lon_deg = (double)nmea->getLongitude() / 1000000.0;
+            // approximate timezone hours: 360deg / 24 = 15deg per hour
+            int tz_hours = (int)round(lon_deg / 15.0);
+            tz_offset_seconds = tz_hours * 3600L;
+          }
+        }
+        time_t adjusted = msg_time + tz_offset_seconds;
+        struct tm timeinfo;
+        // Use UTC conversion on adjusted time so we don't depend on local libc TZ
+        gmtime_r(&adjusted, &timeinfo);
+        sprintf(tmp, "%04d-%02d-%02d %02d:%02d", timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min);
+        display.print(tmp);
+        
+        // Show message content - write full text message (moved down one row)
+        display.setColor(DisplayDriver::GREEN);
+        display.setTextSize(1);
+        display.setCursor(0, 50);
+        
+        const char* msg_text = _task->getLatestEmergencyText();
+        // Write the message directly - print character by character to display full text
+        // The display will handle line wrapping if the text is long
+        display.print(msg_text);
+      } else {
+        // No emergency message - show blank area
+        display.setColor(DisplayDriver::LIGHT);
+        display.setTextSize(1);
+        display.setCursor(0, 30);
+        display.print("No Emergency Msg");
+      }
 
       #ifdef WIFI_SSID
         IPAddress ip = WiFi.localIP();
         snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
         display.setTextSize(1);
-        display.drawTextCentered(display.width() / 2, 54, tmp); 
+        display.setColor(DisplayDriver::LIGHT);
+        display.drawTextCentered(display.width() / 2, display.height() - 8, tmp); 
       #endif
-      if (_task->hasConnection()) {
-        display.setColor(DisplayDriver::GREEN);
-        display.setTextSize(1);
-        display.drawTextCentered(display.width() / 2, 43, "< Connected >");
-
-      } else if (the_mesh.getBLEPin() != 0) { // BT pin
-        display.setColor(DisplayDriver::RED);
-        display.setTextSize(2);
-        sprintf(tmp, "Pin:%d", the_mesh.getBLEPin());
-        display.drawTextCentered(display.width() / 2, 43, tmp);
-      }
     } else if (_page == HomePage::RECENT) {
       the_mesh.getRecentlyHeard(recent, UI_RECENT_LIST_SIZE);
       display.setColor(DisplayDriver::GREEN);
@@ -551,6 +601,12 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _sensors = sensors;
   _auto_off = millis() + AUTO_OFF_MILLIS;
 
+  // Initialize emergency message storage
+  _latest_emergency_msg.timestamp = 0;
+  _latest_emergency_msg.timestamp_set = false;
+  _latest_emergency_msg.sender[0] = 0;
+  _latest_emergency_msg.text[0] = 0;
+
 #if defined(PIN_USER_BTN)
   user_btn.begin();
 #endif
@@ -639,16 +695,64 @@ void UITask::msgRead(int msgcount) {
 void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, int msgcount) {
   _msgcount = msgcount;
 
-  ((MsgPreviewScreen *) msg_preview)->addPreview(path_len, from_name, text);
-  setCurrScreen(msg_preview);
-
-  if (_display != NULL) {
-    if (!_display->isOn() && !hasConnection()) {
-      _display->turnOn();
+  // Check if this is an Emergency group message
+  if (strcmp(from_name, "Emergency") == 0) {
+    // Store the latest Emergency message
+    // Extract sender name and message content from text (format: "SenderName: message")
+    const char* msg_part = strchr(text, ':');
+    if (msg_part) {
+      // Store sender name (before the colon)
+      int sender_len = msg_part - text;
+      if (sender_len > sizeof(_latest_emergency_msg.sender) - 1)
+        sender_len = sizeof(_latest_emergency_msg.sender) - 1;
+      strncpy(_latest_emergency_msg.sender, text, sender_len);
+      _latest_emergency_msg.sender[sender_len] = 0;
+      
+      // Store message content (after the colon and spaces)
+      msg_part++;  // skip the colon
+      while (*msg_part == ' ') msg_part++;  // skip spaces
+      strncpy(_latest_emergency_msg.text, msg_part, sizeof(_latest_emergency_msg.text) - 1);
+    } else {
+      // No colon, use full text as message
+      strncpy(_latest_emergency_msg.sender, "Unknown", sizeof(_latest_emergency_msg.sender) - 1);
+      strncpy(_latest_emergency_msg.text, text, sizeof(_latest_emergency_msg.text) - 1);
     }
-    if (_display->isOn()) {
-    _auto_off = millis() + AUTO_OFF_MILLIS;  // extend the auto-off timer
-    _next_refresh = 100;  // trigger refresh
+    _latest_emergency_msg.text[sizeof(_latest_emergency_msg.text) - 1] = 0;
+    _latest_emergency_msg.sender[sizeof(_latest_emergency_msg.sender) - 1] = 0;
+    _latest_emergency_msg.timestamp_set = false;  // Will be set when first displayed
+    
+    // Start repeating buzzer sequence for Emergency message
+#ifdef PIN_BUZZER
+    _buzzer_alert_active = true;
+    _buzzer_pause_phase = true;
+    _buzzer_next_event = millis();
+#endif
+
+    // For Emergency: go to home screen and stay there
+    gotoHomeScreen();
+    
+    if (_display != NULL) {
+      if (!_display->isOn() && !hasConnection()) {
+        _display->turnOn();
+      }
+      if (_display->isOn()) {
+        _auto_off = millis() + AUTO_OFF_MILLIS;  // extend the auto-off timer
+        _next_refresh = 100;  // trigger refresh
+      }
+    }
+  } else {
+    // For non-Emergency messages, show the preview screen as normal
+    ((MsgPreviewScreen *) msg_preview)->addPreview(path_len, from_name, text);
+    setCurrScreen(msg_preview);
+
+    if (_display != NULL) {
+      if (!_display->isOn() && !hasConnection()) {
+        _display->turnOn();
+      }
+      if (_display->isOn()) {
+        _auto_off = millis() + AUTO_OFF_MILLIS;  // extend the auto-off timer
+        _next_refresh = 100;  // trigger refresh
+      }
     }
   }
 }
@@ -787,6 +891,21 @@ void UITask::loop() {
   userLedHandler();
 
 #ifdef PIN_BUZZER
+  // Handle repeating buzzer pattern for Emergency alerts
+  if (_buzzer_alert_active && millis() >= _buzzer_next_event) {
+    if (_buzzer_pause_phase) {
+      // Sound phase: 500ms
+      buzzer.play("sos:d=4,o=6,b=100:32c,32c,32c");
+      _buzzer_next_event = millis() + 500;
+      _buzzer_pause_phase = false;
+    } else {
+      // Pause phase: 1000ms
+      buzzer.stop();
+      _buzzer_next_event = millis() + 1000;
+      _buzzer_pause_phase = true;
+    }
+  }
+  
   if (buzzer.isPlaying())  buzzer.loop();
 #endif
 
@@ -849,6 +968,9 @@ void UITask::loop() {
 }
 
 char UITask::checkDisplayOn(char c) {
+  // Stop emergency buzzer on any button press
+  stopEmergencyBuzzer();
+  
   if (_display != NULL) {
     if (!_display->isOn()) {
       _display->turnOn();   // turn display on and consume event

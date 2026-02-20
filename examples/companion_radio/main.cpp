@@ -1,6 +1,8 @@
 #include <Arduino.h>   // needed for PlatformIO
 #include <Mesh.h>
 #include "MyMesh.h"
+#include <stdlib.h>
+#include <time.h>
 
 // Believe it or not, this std C function is busted on some platforms!
 static uint32_t _atoi(const char* sp) {
@@ -212,6 +214,18 @@ void setup() {
 #endif
 
   sensors.begin();
+
+#if defined(ESP32) || defined(NRF52_PLATFORM) || defined(STM32_PLATFORM) || defined(RP2040_PLATFORM)
+  // Apply saved TZ offset from preferences (persistent)
+  int8_t tz = the_mesh.getNodePrefs()->tz_offset;
+  if (tz != 0) {
+    char tzbuf[16];
+    // Construct a simple UTC offset TZ string, e.g. "UTC+1" or "UTC-5"
+    snprintf(tzbuf, sizeof(tzbuf), "UTC%+d", tz);
+    setenv("TZ", tzbuf, 1);
+    tzset();
+  }
+#endif
 
 #ifdef DISPLAY_CLASS
   ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());  // still want to pass this in as dependency, as prefs might be moved

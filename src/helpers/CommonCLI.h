@@ -52,6 +52,7 @@ struct NodePrefs { // persisted to file
   uint32_t discovery_mod_timestamp;
   float adc_multiplier;
   char owner_info[120];
+  int8_t tz_offset; // hours offset from UTC (e.g., +1, -5)
 };
 
 class CommonCLICallbacks {

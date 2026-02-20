@@ -48,6 +48,21 @@ class UITask : public AbstractUITask {
   unsigned long _analogue_pin_read_millis = millis();
 #endif
 
+  // Emergency group message storage
+  struct EmergencyMsg {
+    char sender[32];
+    char text[200];  // Increased to store longer messages
+    uint32_t timestamp;
+    bool timestamp_set = false;  // Flag to indicate if timestamp has been recorded
+  } _latest_emergency_msg;
+
+#ifdef PIN_BUZZER
+  // Buzzer repeating pattern state
+  bool _buzzer_alert_active = false;
+  unsigned long _buzzer_next_event = 0;
+  bool _buzzer_pause_phase = true;  // true = pause (1000ms), false = sound (500ms)
+#endif
+
   UIScreen* splash;
   UIScreen* home;
   UIScreen* msg_preview;
@@ -75,6 +90,15 @@ public:
   void gotoHomeScreen() { setCurrScreen(home); }
   void showAlert(const char* text, int duration_millis);
   int  getMsgCount() const { return _msgcount; }
+  
+  // Emergency message access
+  const char* getLatestEmergencySender() const { return _latest_emergency_msg.sender; }
+  const char* getLatestEmergencyText() const { return _latest_emergency_msg.text; }
+  uint32_t getLatestEmergencyTimestamp() const { return _latest_emergency_msg.timestamp; }
+  bool hasEmergencyMsg() const { return _latest_emergency_msg.sender[0] != 0; }
+  bool isEmergencyTimestampSet() const { return _latest_emergency_msg.timestamp_set; }
+  void setEmergencyTimestamp(uint32_t ts) { _latest_emergency_msg.timestamp = ts; _latest_emergency_msg.timestamp_set = true; }
+  
   bool hasDisplay() const { return _display != NULL; }
   bool isButtonPressed() const;
 
@@ -90,6 +114,13 @@ public:
   bool getGPSState();
   void toggleGPS();
 
+  // Emergency alert buzzer control
+  void stopEmergencyBuzzer() {
+#ifdef PIN_BUZZER
+    _buzzer_alert_active = false;
+    buzzer.stop();
+#endif
+  }
 
   // from AbstractUITask
   void msgRead(int msgcount) override;
