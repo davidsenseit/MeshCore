@@ -17,9 +17,6 @@
 #endif
 
 #ifdef RAK_WISMESH_TAG
-  #ifndef SOS_GROUP_CHANNEL_IDX
-    #define SOS_GROUP_CHANNEL_IDX 0
-  #endif
   #ifndef SOS_GROUP_NAME
     #define SOS_GROUP_NAME "Emergency"
   #endif
