@@ -4,6 +4,7 @@
 #include "target.h"
 #include <ctime>
 #include <cmath>
+#include <strings.h>
 #ifdef WIFI_SSID
   #include <WiFi.h>
 #endif
@@ -29,6 +30,10 @@
   #define PRESS_LABEL "press Enter"
 #else
   #define PRESS_LABEL "long press"
+#endif
+
+#ifndef SOS_GROUP_NAME
+  #define SOS_GROUP_NAME "Emergency"
 #endif
 
 #include "icons.h"
@@ -174,6 +179,11 @@ public:
   HomeScreen(UITask* task, mesh::RTCClock* rtc, SensorManager* sensors, NodePrefs* node_prefs)
      : _task(task), _rtc(rtc), _sensors(sensors), _node_prefs(node_prefs), _page(0), 
        _shutdown_init(false), sensors_lpp(200) {  }
+
+  void goToFirstPage() {
+    _page = HomePage::FIRST;
+    _shutdown_init = false;
+  }
 
   void poll() override {
     if (_shutdown_init && !_task->isButtonPressed()) {  // must wait for USR button to be released
@@ -696,7 +706,7 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
   _msgcount = msgcount;
 
   // Check if this is an Emergency group message
-  if (strcmp(from_name, "Emergency") == 0) {
+  if (strcasecmp(from_name, SOS_GROUP_NAME) == 0) {
     // Store the latest Emergency message
     // Extract sender name and message content from text (format: "SenderName: message")
     const char* msg_part = strchr(text, ':');
@@ -721,14 +731,14 @@ void UITask::newMsg(uint8_t path_len, const char* from_name, const char* text, i
     _latest_emergency_msg.sender[sizeof(_latest_emergency_msg.sender) - 1] = 0;
     _latest_emergency_msg.timestamp_set = false;  // Will be set when first displayed
     
-    // Start repeating buzzer sequence for Emergency message
-#ifdef PIN_BUZZER
-    _buzzer_alert_active = true;
-    _buzzer_pause_phase = true;
-    _buzzer_next_event = millis();
-#endif
+    // Start repeating emergency alert sequence (sound/backlight cadence)
+    _emergency_alert_active = true;
+    _emergency_backlight_on = false;
+    _emergency_sound_phase = true;
+    _emergency_next_event = millis();
 
-    // For Emergency: go to home screen and stay there
+    // For Emergency: force first home page and stay there
+    ((HomeScreen *) home)->goToFirstPage();
     gotoHomeScreen();
     
     if (_display != NULL) {
@@ -872,13 +882,27 @@ void UITask::loop() {
 #endif
 #if defined(BACKLIGHT_BTN)
   if (millis() > next_backlight_btn_check) {
-    bool touch_state = digitalRead(PIN_BUTTON2);
+    bool touch_state = digitalRead(BACKLIGHT_BTN);
+    // Emergency alert: blink backlight in sync with buzzer and stop on button press.
+    if (_emergency_alert_active) {
+      if (!touch_state) {
+        stopEmergencyBuzzer();
+      }
 #if defined(DISP_BACKLIGHT)
-    digitalWrite(DISP_BACKLIGHT, !touch_state);
+      digitalWrite(DISP_BACKLIGHT, _emergency_backlight_on);
 #elif defined(EXP_PIN_BACKLIGHT)
-    expander.digitalWrite(EXP_PIN_BACKLIGHT, !touch_state);
+      expander.digitalWrite(EXP_PIN_BACKLIGHT, _emergency_backlight_on);
 #endif
-    next_backlight_btn_check = millis() + 300;
+      next_backlight_btn_check = millis() + 100;
+    } else
+    {
+#if defined(DISP_BACKLIGHT)
+      digitalWrite(DISP_BACKLIGHT, !touch_state);
+#elif defined(EXP_PIN_BACKLIGHT)
+      expander.digitalWrite(EXP_PIN_BACKLIGHT, !touch_state);
+#endif
+      next_backlight_btn_check = millis() + 300;
+    }
   }
 #endif
 
@@ -890,22 +914,25 @@ void UITask::loop() {
 
   userLedHandler();
 
+  // Handle repeating Emergency alert pattern (500ms on, 1000ms off)
+  if (_emergency_alert_active && millis() >= _emergency_next_event) {
+    if (_emergency_sound_phase) {
+      _emergency_backlight_on = true;
 #ifdef PIN_BUZZER
-  // Handle repeating buzzer pattern for Emergency alerts
-  if (_buzzer_alert_active && millis() >= _buzzer_next_event) {
-    if (_buzzer_pause_phase) {
-      // Sound phase: 500ms
       buzzer.play("sos:d=4,o=6,b=100:32c,32c,32c");
-      _buzzer_next_event = millis() + 500;
-      _buzzer_pause_phase = false;
+#endif
+      _emergency_next_event = millis() + 500;
+      _emergency_sound_phase = false;
     } else {
-      // Pause phase: 1000ms
+      _emergency_backlight_on = false;
+#ifdef PIN_BUZZER
       buzzer.stop();
-      _buzzer_next_event = millis() + 1000;
-      _buzzer_pause_phase = true;
+#endif
+      _emergency_next_event = millis() + 1000;
+      _emergency_sound_phase = true;
     }
   }
-  
+#ifdef PIN_BUZZER
   if (buzzer.isPlaying())  buzzer.loop();
 #endif
 

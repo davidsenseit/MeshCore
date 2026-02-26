@@ -44,6 +44,10 @@ void genericBuzzer::shutdown() {
     play(shutdown_song);
 }
 
+void genericBuzzer::stop() {
+    rtttl::stop();
+}
+
 void genericBuzzer::quiet(bool buzzer_state) {
     _is_quiet = buzzer_state;
 #ifdef PIN_BUZZER_EN

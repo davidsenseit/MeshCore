@@ -56,12 +56,11 @@ class UITask : public AbstractUITask {
     bool timestamp_set = false;  // Flag to indicate if timestamp has been recorded
   } _latest_emergency_msg;
 
-#ifdef PIN_BUZZER
-  // Buzzer repeating pattern state
-  bool _buzzer_alert_active = false;
-  unsigned long _buzzer_next_event = 0;
-  bool _buzzer_pause_phase = true;  // true = pause (1000ms), false = sound (500ms)
-#endif
+  // Emergency alert pattern state (kept independent of buzzer hardware)
+  bool _emergency_alert_active = false;
+  unsigned long _emergency_next_event = 0;
+  bool _emergency_sound_phase = true;   // true = sound/on phase (500ms), false = pause/off phase (1000ms)
+  bool _emergency_backlight_on = false;
 
   UIScreen* splash;
   UIScreen* home;
@@ -116,8 +115,9 @@ public:
 
   // Emergency alert buzzer control
   void stopEmergencyBuzzer() {
+    _emergency_alert_active = false;
+    _emergency_backlight_on = false;
 #ifdef PIN_BUZZER
-    _buzzer_alert_active = false;
     buzzer.stop();
 #endif
   }
