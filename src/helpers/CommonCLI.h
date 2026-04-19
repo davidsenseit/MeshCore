@@ -4,6 +4,7 @@
 #include <helpers/IdentityStore.h>
 #include <helpers/SensorManager.h>
 #include <helpers/ClientACL.h>
+#include <helpers/RegionMap.h>
 
 #if defined(WITH_RS232_BRIDGE) || defined(WITH_ESPNOW_BRIDGE)
 #define WITH_BRIDGE
@@ -12,6 +13,11 @@
 #define ADVERT_LOC_NONE       0
 #define ADVERT_LOC_SHARE      1
 #define ADVERT_LOC_PREFS      2
+
+#define LOOP_DETECT_OFF       0
+#define LOOP_DETECT_MINIMAL   1
+#define LOOP_DETECT_MODERATE  2
+#define LOOP_DETECT_STRICT    3
 
 struct NodePrefs { // persisted to file
   float airtime_factor;
@@ -52,6 +58,12 @@ struct NodePrefs { // persisted to file
   uint32_t discovery_mod_timestamp;
   float adc_multiplier;
   char owner_info[120];
+  uint8_t rx_boosted_gain; // power settings
+  uint8_t path_hash_mode;   // which path mode to use when sending
+  uint8_t autoadd_max_hops;  // 0 = no limit, 1 = direct (0 hops), N = up to N-1 hops (max 64)
+  char default_scope_name[31];
+  uint8_t default_scope_key[16];
+  uint8_t loop_detect;
   int8_t tz_offset; // hours offset from UTC (e.g., +1, -5)
 };
 
@@ -81,11 +93,25 @@ public:
   virtual void clearStats() = 0;
   virtual void applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, int timeout_mins) = 0;
 
+  virtual void startRegionsLoad() {
+    // no op by default
+  }
+  virtual bool saveRegions() {
+    return false;
+  }
+  virtual void onDefaultRegionChanged(const RegionEntry* r) {
+    // no op by default
+  }
+
   virtual void setBridgeState(bool enable) {
     // no op by default
   };
 
   virtual void restartBridge() {
+    // no op by default
+  };
+
+  virtual void setRxBoostedGain(bool enable) {
     // no op by default
   };
 };
@@ -96,6 +122,7 @@ class CommonCLI {
   CommonCLICallbacks* _callbacks;
   mesh::MainBoard* _board;
   SensorManager* _sensors;
+  RegionMap* _region_map;
   ClientACL* _acl;
   char tmp[PRV_KEY_SIZE*2 + 4];
 
@@ -103,12 +130,16 @@ class CommonCLI {
   void savePrefs();
   void loadPrefsInt(FILESYSTEM* _fs, const char* filename);
 
+  void handleRegionCmd(char* command, char* reply);
+  void handleGetCmd(uint32_t sender_timestamp, char* command, char* reply);
+  void handleSetCmd(uint32_t sender_timestamp, char* command, char* reply);
+
 public:
-  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors, ClientACL& acl, NodePrefs* prefs, CommonCLICallbacks* callbacks)
-      : _board(&board), _rtc(&rtc), _sensors(&sensors), _acl(&acl), _prefs(prefs), _callbacks(callbacks) { }
+  CommonCLI(mesh::MainBoard& board, mesh::RTCClock& rtc, SensorManager& sensors, RegionMap& region_map, ClientACL& acl, NodePrefs* prefs, CommonCLICallbacks* callbacks)
+      : _board(&board), _rtc(&rtc), _sensors(&sensors), _region_map(&region_map), _acl(&acl), _prefs(prefs), _callbacks(callbacks) { }
 
   void loadPrefs(FILESYSTEM* _fs);
   void savePrefs(FILESYSTEM* _fs);
-  void handleCommand(uint32_t sender_timestamp, const char* command, char* reply);
+  void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
   uint8_t buildAdvertData(uint8_t node_type, uint8_t* app_data);
 };
